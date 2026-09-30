@@ -1,0 +1,159 @@
+from chimerax.core.commands import run as rc
+
+# ==========================================
+# CONFIG
+# ==========================================
+RNA_CHAIN = "B"
+RNA_RESIDUE = 10
+
+# ==========================================
+# STYLE RNA
+# ==========================================
+rc(session, "hide cartoons")
+rc(session, "nucleotides fill")
+rc(session, "style nucleic stick")
+print("✔ RNA styled")
+
+# ==========================================
+# OPEN AMINO ACID
+# ==========================================
+rc(session, "open N[C@@H](Cc1ccccc1)C(=O)O fromDatabase smiles")
+
+rna_model = session.models.list()[0]
+phe_model = session.models.list()[-1]
+
+print("RNA:", rna_model.id_string)
+print("Phe:", phe_model.id_string)
+
+# ==========================================
+# FIND ATOMS
+# ==========================================
+rna_O3 = None
+for a in rna_model.atoms:
+    if (
+        a.residue.chain_id == RNA_CHAIN and
+        a.residue.number == RNA_RESIDUE and
+        a.name in ["O3'", "O3*"]
+    ):
+        rna_O3 = a
+        break
+
+phe_H11 = None
+for a in phe_model.atoms:
+    if a.element.name == "H" and a.name == "H11":
+        phe_H11 = a
+        break
+
+print("RNA O3':", rna_O3)
+print("Phe H11:", phe_H11)
+
+if rna_O3 is None or phe_H11 is None:
+    raise RuntimeError("Atom detection failed")
+
+# ==========================================
+# SELECTION & BONDING
+# ==========================================
+rc(session, "select clear")
+rc(session, f"select {phe_H11.atomspec}")
+rc(session, f"select add {rna_O3.atomspec}")
+
+rc(session, "build join bond sel")
+print("✔ bond created")
+
+# ==========================================
+# PHOSPHATE DELETION
+# ==========================================
+rc(session, "select clear")
+rc(session, "select /A:1@P")
+rc(session, "select add /A:1@OP1")
+rc(session, "select add /A:1@OP2")
+rc(session, "select add /A:1@OP3")
+
+rc(session, "delete sel")
+print("✔ phosphate removed")
+
+# ==========================================
+# HYDROGENATION
+# ==========================================
+rc(session, "addh")
+print("✔ hydrogens added after cleanup")
+
+# ==========================================
+# ANGLE MODULE 1 (O5' → C → O)
+# ==========================================
+rc(session, "select clear")
+rna_model = session.models.list()[0]
+
+o5 = None
+for r in rna_model.residues:
+    if r.chain_id == "A":
+        for a in r.atoms:
+            if a.name in ["O5'", "O5*"]:
+                o5 = a
+                break
+        if o5:
+            break
+
+aa_model = session.models.list()[-1]
+
+aa_C = None
+aa_O = None
+
+for a in aa_model.atoms:
+    if a.element.name == "C":
+        oxy = [n for n in a.neighbors if n.element.name == "O"]
+        if len(oxy) >= 2:
+            aa_C = a
+            aa_O = oxy[0]
+            break
+
+if o5 and aa_C and aa_O:
+    rc(session, f"select {o5.atomspec}")
+    rc(session, f"select add {aa_C.atomspec}")
+    rc(session, f"select add {aa_O.atomspec}")
+
+    rc(session, "angle sel")
+    print("✔ angle computed: O5' → C → O")
+else:
+    print("⚠ angle skipped (atoms not found)")
+
+# ==========================================
+# DISTANCE MODULE (O5' → UNL 11 C9)
+# ==========================================
+unl_11_c9 = None
+for m in session.models.list():
+    for a in m.atoms:
+        if a.residue.name == "UNL" and a.residue.number == 11 and a.name == "C9":
+            unl_11_c9 = a
+            break
+    if unl_11_c9:
+        break
+
+if o5 and unl_11_c9:
+    rc(session, f"distance {o5.atomspec} {unl_11_c9.atomspec}")
+    print("✔ distance computed: O5' (Chain A, Res 1) → UNL 11 C9")
+else:
+    print("⚠ distance skipped (O5' or UNL 11 C9 atom not found)")
+
+# ==========================================
+# ANGLE MODULE 2 (O5' → UNL 11 C9 → UNL 11 O1)
+# ==========================================
+unl_11_o1 = None
+for m in session.models.list():
+    for a in m.atoms:
+        if a.residue.name == "UNL" and a.residue.number == 11 and a.name == "O1":
+            unl_11_o1 = a
+            break
+    if unl_11_o1:
+        break
+
+if o5 and unl_11_c9 and unl_11_o1:
+    rc(session, "select clear")
+    rc(session, f"select {o5.atomspec}")
+    rc(session, f"select add {unl_11_c9.atomspec}")
+    rc(session, f"select add {unl_11_o1.atomspec}")
+
+    rc(session, "angle sel")
+    print("✔ second angle computed: O5' → UNL 11 C9 → UNL 11 O1")
+else:
+    print("⚠ second angle skipped (required UNL 11 atoms not found)")
